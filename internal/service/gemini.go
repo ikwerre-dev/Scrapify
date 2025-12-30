@@ -68,20 +68,29 @@ func (s *GeminiService) GenerateStudyGuide(transcription []models.TimelineEntry,
 	transcriptionJSON, _ := json.MarshalIndent(transcription, "", "  ")
 
 	prompt := []genai.Part{
-		genai.Text(fmt.Sprintf(`As an advanced educational assistant, analyze the attached video frames and the provided transcription to create a high-quality, comprehensive study guide.
+		genai.Text(fmt.Sprintf(`As an elite educational architect, analyze the attached video frames and the provided transcription to create an ultra-advanced study guide.
 
 TRANSCRIPTION & TIMELINE:
 %s
 
-INSTRUCTIONS:
-1. Use the images to understand the visual context (slides, demonstrations, facial expressions).
-2. Synthesize the text and visuals into a structured study guide.
-3. Return the result strictly in JSON format with these fields:
-   - title: A descriptive and engaging title.
-   - summary: A 2-3 paragraph high-level overview.
-   - key_points: A list of the most important takeaways.
-   - glossary: A list of technical terms or concepts with definitions.
-   - timeline: A detailed chronological breakdown of events/topics.
+OUTPUT REQUIREMENTS (Strict JSON):
+1. **Title & Summary**: High-level context of the material.
+2. **Visual Bit-by-Bit Analysis**: For each image grid (5x4 layout, 20 items per grid), explain the key visual information and process shown in EACH snapshot. Reference them by grid index and item index (1-20).
+3. **External Resources**: Based on the content, provide 3-5 high-quality YouTube tutorial links or web documentation links that cover similar concepts.
+4. **Pop Quiz**: Generate a 5-question interactive quiz (multiple choice) based on the video content to test comprehension.
+5. **Full Guide Synthesis**: Integrate transcribed concepts with visual proof.
+
+JSON STRUCTURE:
+{
+  "title": "...",
+  "summary": "...",
+  "key_points": ["..."],
+  "glossary": [{"term": "...", "definition": "..."}],
+  "timeline": [{"timestamp": "...", "event": "..."}],
+  "visual_analysis": [{"grid_index": 1, "item_index": 1, "timestamp": "...", "explanation": "..."}],
+  "external_resources": [{"type": "video|article", "title": "...", "url": "..."}],
+  "quiz": [{"question": "...", "options": ["...", "..."], "answer": "..."}]
+}
 `, string(transcriptionJSON))),
 	}
 
