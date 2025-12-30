@@ -63,7 +63,7 @@ func (s *GeminiService) TranscribeAudio(audioPath string) ([]models.TimelineEntr
 }
 
 func (s *GeminiService) GenerateStudyGuide(transcription []models.TimelineEntry, gridImagePath string) (*models.StudyGuide, error) {
-	model := s.client.GenerativeModel("gemini-1.5-flash")
+	model := s.client.GenerativeModel("gemini-2.5-flash-lite")
 
 	gridData, err := os.ReadFile(gridImagePath)
 	if err != nil {

@@ -16,15 +16,21 @@ func main() {
 	}
 
 	// Initialize services
-	mediaService := service.NewMediaService()
-	imageService := service.NewImageService()
-	geminiService, err := service.NewGeminiService(apiKey)
+	ms := service.NewMediaService()
+	is := service.NewImageService()
+	gs, err := service.NewGeminiService(apiKey)
 	if err != nil {
 		log.Fatalf("Failed to initialize Gemini service: %v", err)
 	}
+	ss := service.NewStorageService("tasks.json")
+	ws := service.NewWorkerService(ms, is, gs, ss, 100)
+
+	// Start worker pool (e.g., 5 concurrent workers)
+	ws.Start(5)
 
 	// Initialize handlers
-	uploadHandler := handler.NewUploadHandler(mediaService, imageService, geminiService)
+	uh := handler.NewUploadHandler(ss, ws)
+	sh := handler.NewStatusHandler(ss)
 
 	// Setup router
 	r := gin.Default()
@@ -32,7 +38,8 @@ func main() {
 	// Max upload size 100MB
 	r.MaxMultipartMemory = 100 << 20
 
-	r.POST("/upload", uploadHandler.HandleUpload)
+	r.POST("/upload", uh.HandleUpload)
+	r.GET("/status/:id", sh.GetStatus)
 
 	// Serve static files for processed images
 	r.Static("/processed", "./processed")

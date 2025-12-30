@@ -1,27 +1,25 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"scrapify/internal/service"
 	"scrapify/pkg/models"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type UploadHandler struct {
-	mediaService  *service.MediaService
-	imageService  *service.ImageService
-	geminiService *service.GeminiService
+	storage       *service.StorageService
+	workerService *service.WorkerService
 }
 
-func NewUploadHandler(ms *service.MediaService, is *service.ImageService, gs *service.GeminiService) *UploadHandler {
+func NewUploadHandler(ss *service.StorageService, ws *service.WorkerService) *UploadHandler {
 	return &UploadHandler{
-		mediaService:  ms,
-		imageService:  is,
-		geminiService: gs,
+		storage:       ss,
+		workerService: ws,
 	}
 }
 
@@ -32,63 +30,36 @@ func (h *UploadHandler) HandleUpload(c *gin.Context) {
 		return
 	}
 
-	uploadPath := filepath.Join("uploads", file.Filename)
+	taskID := uuid.New().String()
+	ext := filepath.Ext(file.Filename)
+	storedName := taskID + ext
+	uploadPath := filepath.Join("uploads", storedName)
+
 	if err := c.SaveUploadedFile(file, uploadPath); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save video"})
 		return
 	}
 
-	// 1. Generate Snapshots
-	snapshotDir := filepath.Join("snapshots", file.Filename)
-	snapshots, err := h.mediaService.GenerateSnapshots(uploadPath, snapshotDir)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to generate snapshots: %v", err)})
+	task := &models.Task{
+		ID:           taskID,
+		OriginalName: file.Filename,
+		StoredName:   storedName,
+		Status:       models.StatusPending,
+		Stages:       []*models.Stage{},
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	if err := h.storage.SaveTask(task); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initialize task"})
 		return
 	}
 
-	// 2. Extract Audio
-	audioPath := filepath.Join("processed", file.Filename+".mp3")
-	if err := h.mediaService.ExtractAudio(uploadPath, audioPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to extract audio: %v", err)})
-		return
-	}
+	// Dispatch to background worker
+	h.workerService.Enqueue(task)
 
-	// 3. Create Image Grid
-	gridPath := filepath.Join("processed", file.Filename+"_grid.jpg")
-	if err := h.imageService.CreateGrid(snapshots, gridPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to create image grid: %v", err)})
-		return
-	}
-
-	// 4. Transcribe Audio
-	transcription, err := h.geminiService.TranscribeAudio(audioPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to transcribe audio: %v", err)})
-		return
-	}
-
-	// 5. Generate Study Guide
-	guide, err := h.geminiService.GenerateStudyGuide(transcription, gridPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to generate study guide: %v", err)})
-		return
-	}
-
-	// 6. Save final JSON
-	result := models.AnalysisResult{
-		Transcription: transcription,
-		StudyGuide:    *guide,
-		ImagePath:     gridPath,
-	}
-
-	outputPath := filepath.Join("output", file.Filename+".json")
-	outputFile, err := os.Create(outputPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save output JSON"})
-		return
-	}
-	defer outputFile.Close()
-
-	// Return result
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "Upload successful, processing started.",
+		"task_id": taskID,
+	})
 }
