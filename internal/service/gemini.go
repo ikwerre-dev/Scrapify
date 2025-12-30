@@ -62,24 +62,41 @@ func (s *GeminiService) TranscribeAudio(audioPath string) ([]models.TimelineEntr
 	return transcription, nil
 }
 
-func (s *GeminiService) GenerateStudyGuide(transcription []models.TimelineEntry, gridImagePath string) (*models.StudyGuide, error) {
+func (s *GeminiService) GenerateStudyGuide(transcription []models.TimelineEntry, gridImagePaths []string) (*models.StudyGuide, error) {
 	model := s.client.GenerativeModel("gemini-2.5-flash-lite")
 
-	gridData, err := os.ReadFile(gridImagePath)
-	if err != nil {
-		return nil, err
-	}
-
-	transcriptionJSON, _ := json.Marshal(transcription)
+	transcriptionJSON, _ := json.MarshalIndent(transcription, "", "  ")
 
 	prompt := []genai.Part{
-		genai.Text(fmt.Sprintf("Based on the following transcription and the attached image grid (which contains snapshots of the video), generate a comprehensive study guide in JSON format. The JSON should have 'title', 'summary', 'key_points' (array), 'glossary' (array of {term: definition}), and 'timeline' (array of {timestamp: string, event: string}) fields. Transcription: %s", string(transcriptionJSON))),
-		genai.Blob{MIMEType: "image/jpeg", Data: gridData},
+		genai.Text(fmt.Sprintf(`As an advanced educational assistant, analyze the attached video frames and the provided transcription to create a high-quality, comprehensive study guide.
+
+TRANSCRIPTION & TIMELINE:
+%s
+
+INSTRUCTIONS:
+1. Use the images to understand the visual context (slides, demonstrations, facial expressions).
+2. Synthesize the text and visuals into a structured study guide.
+3. Return the result strictly in JSON format with these fields:
+   - title: A descriptive and engaging title.
+   - summary: A 2-3 paragraph high-level overview.
+   - key_points: A list of the most important takeaways.
+   - glossary: A list of technical terms or concepts with definitions.
+   - timeline: A detailed chronological breakdown of events/topics.
+`, string(transcriptionJSON))),
+	}
+
+	// Add all grid images to the prompt
+	for _, path := range gridImagePaths {
+		gridData, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read grid image %s: %v", path, err)
+		}
+		prompt = append(prompt, genai.Blob{MIMEType: "image/jpeg", Data: gridData})
 	}
 
 	resp, err := model.GenerateContent(s.ctx, prompt...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gemini generation failed: %v", err)
 	}
 
 	var guide models.StudyGuide

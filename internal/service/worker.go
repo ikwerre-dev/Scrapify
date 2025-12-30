@@ -1,7 +1,9 @@
 package service
 
 import (
+	"encoding/json"
 	"log"
+	"os"
 	"path/filepath"
 	"scrapify/pkg/models"
 	"time"
@@ -72,6 +74,14 @@ func (s *WorkerService) processTask(task *models.Task) {
 		s.storage.SaveTask(task)
 	}
 
+	// Create dedicated processed folder for the task
+	processedDir := filepath.Join("processed", task.ID)
+	if err := os.MkdirAll(processedDir, 0755); err != nil {
+		task.Status = models.StatusFailed
+		s.storage.SaveTask(task)
+		return
+	}
+
 	uploadPath := filepath.Join("uploads", task.StoredName)
 
 	// 1. Media Processing (Parallel Snapshots & Audio)
@@ -87,7 +97,7 @@ func (s *WorkerService) processTask(task *models.Task) {
 		errChan <- err
 	}()
 
-	audioPath := filepath.Join("processed", task.ID+".mp3")
+	audioPath := filepath.Join(processedDir, "audio.mp3")
 	go func() {
 		errChan <- s.mediaService.ExtractAudio(uploadPath, audioPath)
 	}()
@@ -102,7 +112,7 @@ func (s *WorkerService) processTask(task *models.Task) {
 
 	// 2. Create Image Grids
 	gridStage := addStage("Grid Generation")
-	gridPrefix := filepath.Join("processed", task.ID)
+	gridPrefix := filepath.Join(processedDir, "grid")
 	grids, err := s.imageService.CreateGrids(snapshots, gridPrefix)
 	if err != nil {
 		finishStage(gridStage, err)
@@ -121,22 +131,26 @@ func (s *WorkerService) processTask(task *models.Task) {
 
 	// 4. Study Guide
 	guideStage := addStage("Study Guide Generation")
-	// Use the first grid for overview, or adjust GeminiService to handle multiple
-	guide, err := s.geminiService.GenerateStudyGuide(transcription, grids[0])
+	guide, err := s.geminiService.GenerateStudyGuide(transcription, grids)
 	if err != nil {
 		finishStage(guideStage, err)
 		return
 	}
 	finishStage(guideStage, nil)
 
-	// Finalize
-	task.Status = models.StatusCompleted
-	task.TotalTime = time.Since(startTime)
+	// Finalize Result
 	task.Result = &models.AnalysisResult{
 		Transcription: transcription,
 		StudyGuide:    *guide,
-		ImagePath:     grids[0], // Primary grid
+		ImagePaths:    grids,
 	}
+
+	// Save final JSON to the processed directory
+	resultData, _ := json.MarshalIndent(task.Result, "", "  ")
+	os.WriteFile(filepath.Join(processedDir, "final_report.json"), resultData, 0644)
+
+	task.Status = models.StatusCompleted
+	task.TotalTime = time.Since(startTime)
 	task.UpdatedAt = time.Now()
 	s.storage.SaveTask(task)
 }
